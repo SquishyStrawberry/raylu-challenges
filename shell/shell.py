@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 import os
+import signal
 
 
 def main():
     while True:
-        command, *args = input("> ").split()
+        try:
+            command, *args = input("> ").split()
+        except ValueError:
+            continue
+        except EOFError:
+            break
         if command == "cd":
             if len(args) < 2:
                 os.chdir(os.environ["HOME"])
@@ -14,6 +20,8 @@ def main():
             print(os.getcwd())
         else:
             pid = os.fork()
+            signal.signal(signal.SIGINT,
+                          lambda *_: os.kill(pid, signal.SIGINT))
             if pid == 0:
                 if len(args) >= 2 and args[-2] == ">":
                     if not os.path.exists(args[-1]):
