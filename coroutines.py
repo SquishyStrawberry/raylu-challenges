@@ -24,7 +24,11 @@ class EventLoop:
                 self.doing_nothing.append(self.send_wait.pop(sock))
 
         for coroutine in tuple(self.doing_nothing):
-            why, what, *extra = next(coroutine)
+            try:
+                why, what, *extra = next(coroutine)
+            except StopIteration:
+                self.doing_nothing.remove(coroutine)
+                continue
             if why == "recv":
                 self.doing_nothing.remove(coroutine)
                 self.recv_wait[what] = coroutine

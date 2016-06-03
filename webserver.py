@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+import mimetypes
+import os
 import shutil
 import socket
-import os
 import threading
 import typing as t
 
@@ -41,8 +42,8 @@ def translate_headers(header_lines: t.Iterable[str]) -> t.Mapping[str, str]:
     return headers
 
 
-def send_headers(client: Socket, status_code: int, headers: t.Mapping[str, str],
-                 *, mark_end: bool = True):
+def send_headers(client: Socket, status_code: int,
+                 headers: t.Mapping[str, str] = {}, *, mark_end: bool = True):
 
     yield "send", client
     client.sendall({
@@ -72,16 +73,22 @@ def send_file(client: Socket, filename: str):
 def handle_client(page: str, client: Socket, address: t.Tuple[str, str]):
     conn_info, *header_lines = yield from recv_lines(client)
     method, path, html_version = conn_info.split()
-    assert method == "GET"
-    assert path == "/"
-    assert html_version == "HTTP/1.1"
-
-    _ = translate_headers(header_lines)
-    filesize = os.path.getsize(page)
-    yield from send_headers(client, 200, {
-        "Content-Length": str(filesize),
-    }, mark_end=True)
-    yield from send_file(client, page)
+    try:
+        assert method == "GET"
+        assert path == "/"
+        assert html_version == "HTTP/1.1"
+    except AssertionError:
+        yield from send_headers(client, 400)
+    else:
+        _ = translate_headers(header_lines)
+        filesize = os.path.getsize(page)
+        mimetype, encoding = mimetypes.guess_type(page)
+        yield from send_headers(client, 200, {
+            "Content-Length": str(filesize),
+            "Content-Type": mimetype or "",
+            "Content-Encoding": encoding or "",
+        }, mark_end=True)
+        yield from send_file(client, page)
 
     yield "send", client
     client.sendall(b"\r\n")
