@@ -5,12 +5,15 @@ import os
 import threading
 import typing as t
 
+from coroutines import EventLoop
+
 Socket = socket.SocketType
 
 
 def recv_lines(client: Socket, *, eol=b"\r\n") -> t.List[str]:
     buf = b""
     while eol not in buf:
+        yield "recv", client
         buf += client.recv(4096)
     return [line.decode("utf-8") for line in buf.split(eol)]
 
@@ -18,7 +21,8 @@ def recv_lines(client: Socket, *, eol=b"\r\n") -> t.List[str]:
 def recv_n_lines(client: Socket, amount: int, *, eol=b"\r\n") -> t.List[str]:
     lines = []
     while len(lines) < amount:
-        lines.extend(recv_lines(client, eol=eol))
+        new_lines = yield from recv_lines(client, eol=eol)
+        lines.extend(new_lines)
     return lines
 
 
@@ -39,6 +43,8 @@ def translate_headers(header_lines: t.Iterable[str]) -> t.Mapping[str, str]:
 
 def send_headers(client: Socket, status_code: int, headers: t.Mapping[str, str],
                  *, mark_end: bool = True):
+
+    yield "send", client
     client.sendall({
         200: "HTTP/1.1 200 OK",
         400: "HTTP/1.1 400 Bad Request",
@@ -48,18 +54,23 @@ def send_headers(client: Socket, status_code: int, headers: t.Mapping[str, str],
         # Sadly, `bytes.format` is not a thing.
         header_string.append(b"%s: %s" % (key.encode("utf-8"),
                                           value.encode("utf-8")))
+    yield "send", client
     client.sendall(b"\r\n".join(header_string) + b"\r\n")
     if mark_end:
+        yield "send", client
         client.sendall(b"\r\n")
 
 
 def send_file(client: Socket, filename: str):
     with open(filename, "rb") as fileobj:
-        shutil.copyfileobj(fileobj, client.makefile("wb"))
+        while True:
+            chunk = fileobj.read(4096)
+            yield "send", client
+            client.sendall(chunk)
 
 
 def handle_client(page: str, client: Socket, address: t.Tuple[str, str]):
-    conn_info, *header_lines = recv_lines(client)
+    conn_info, *header_lines = yield from recv_lines(client)
     method, path, html_version = conn_info.split()
     assert method == "GET"
     assert path == "/"
@@ -67,13 +78,15 @@ def handle_client(page: str, client: Socket, address: t.Tuple[str, str]):
 
     _ = translate_headers(header_lines)
     filesize = os.path.getsize(page)
-    send_headers(client, 200, {
+    yield from send_headers(client, 200, {
         "Content-Length": str(filesize),
     }, mark_end=True)
-    send_file(client, page)
+    yield from send_file(client, page)
 
+    yield "send", client
     client.sendall(b"\r\n")
     client.close()
+
 
 def main_server(page: str, host: str = "localhost", port: int = 8080):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -81,13 +94,16 @@ def main_server(page: str, host: str = "localhost", port: int = 8080):
     server.bind((host, port))
     server.listen(1)
     while True:
+        yield "recv", server
         client, address = server.accept()
-        threading.Thread(target=handle_client,
-                         args=(page, client, address)).start()
+        yield "new_coroutine", handle_client, (page, client, address), {}
 
 
 def main():
     import sys
+
+    socket.setdefaulttimeout(0)
+    el = EventLoop()
 
     try:
         page = sys.argv[1]
@@ -95,7 +111,8 @@ def main():
         print("USAGE: webserver.py FILENAME")
         sys.exit(1)
     else:
-        main_server(page)
+        el.start_new_coroutine(main_server, (page,))
+        el.mainloop()
 
 if __name__ == "__main__":
     main()
