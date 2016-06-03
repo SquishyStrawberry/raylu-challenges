@@ -37,42 +37,40 @@ def translate_headers(header_lines: t.Iterable[str]) -> t.Mapping[str, str]:
     return headers
 
 
-def create_header_string(headers: t.Mapping[str, str]) -> bytes:
+def send_headers(client: Socket, status_code: int, headers: t.Mapping[str, str],
+                 *, mark_end: bool = True):
+    client.sendall({
+        200: "HTTP/1.1 200 OK",
+        400: "HTTP/1.1 400 Bad Request",
+    }[status_code].encode("utf-8") + b"\r\n")
     header_string = []
     for key, value in headers.items():
         # Sadly, `bytes.format` is not a thing.
         header_string.append(b"%s: %s" % (key.encode("utf-8"),
                                           value.encode("utf-8")))
-    return b"\r\n".join(header_string) + b"\r\n"
+    client.sendall(b"\r\n".join(header_string) + b"\r\n")
+    if mark_end:
+        client.sendall(b"\r\n")
 
 
-def send_status(client: Socket, status_code: int):
-    client.sendall({
-        200: "HTTP/1.1 200 OK",
-        400: "HTTP/1.1 400 Bad Request",
-    }[status_code].encode("utf-8") + b"\r\n")
+def send_file(client: Socket, filename: str):
+    with open(filename, "rb") as fileobj:
+        shutil.copyfileobj(fileobj, client.makefile("wb"))
 
 
 def handle_client(page: str, client: Socket, address: t.Tuple[str, str]):
-    _ = address
     conn_info, *header_lines = recv_lines(client)
     method, path, html_version = conn_info.split()
-
     assert method == "GET"
     assert path == "/"
     assert html_version == "HTTP/1.1"
-    headers = translate_headers(header_lines)
 
+    _ = translate_headers(header_lines)
     filesize = os.path.getsize(page)
-
-    send_status(client, 200)
-    client.sendall(create_header_string({
+    send_headers(client, 200, {
         "Content-Length": str(filesize),
-    }))
-    client.sendall(b"\r\n")
-
-    with open(page, "rb") as page_file:
-        shutil.copyfileobj(page_file, client.makefile("wb"))
+    }, mark_end=True)
+    send_file(client, page)
 
     client.sendall(b"\r\n")
     client.close()
