@@ -36,14 +36,23 @@ def translate_headers(header_lines: t.Iterable[str]) -> t.Mapping[str, str]:
     return headers
 
 
+def create_header_string(headers: t.Mapping[str, str]) -> bytes:
+    header_string = []
+    for key, value in headers.items():
+        # Sadly, `bytes.format` is not a thing.
+        header_string.append(b"%s: %s" % (key.encode("utf-8"),
+                                          value.encode("utf-8")))
+    return b"\r\n".join(header_string) + b"\r\n"
+
+
 def send_status(client: Socket, status_code: int):
-    client.send({
+    client.sendall({
         200: "HTTP/1.1 200 OK",
         400: "HTTP/1.1 400 Bad Request",
     }[status_code].encode("utf-8") + b"\r\n")
 
 
-def main_server(host="localhost", port=8080):
+def main_server(page: bytes, host: str = "localhost", port: int = 8080):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
@@ -59,22 +68,28 @@ def main_server(host="localhost", port=8080):
         except AssertionError:
             send_status(client, 400)
         else:
-            _ = translate_headers(header_lines)
+            headers = translate_headers(header_lines)
+            pprint(headers)
             send_status(client, 200)
-            client.sendall(b"\r\n\r\n")
-            client.sendall(b"<html>"
-                           b"<head>"
-                           b"<title>Test Title!</title>"
-                           b"</head>"
-                           b"<body>"
-                           b"<span>Hello, world!</span>"
-                           b"</body>"
-                           b"</html>")
+            client.sendall(create_header_string({
+                "Content-Length": str(len(page)),
+            }))
+            client.sendall(b"\r\n")
+            client.sendall(page)
         client.close()
 
 
 def main():
-    main_server()
+    import sys
+
+    try:
+        with open(sys.argv[1]) as page_file:
+            page = page_file.read()
+    except IndexError:
+        print("USAGE: webserver.py FILENAME")
+        sys.exit(1)
+    else:
+        main_server(page.encode("utf-8"))
 
 if __name__ == "__main__":
     main()
