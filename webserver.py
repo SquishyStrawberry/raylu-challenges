@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 import socket
+import threading
 import typing as t
-
-from pprint import pprint  # TODO Remove this.
 
 Socket = socket.SocketType
 
@@ -52,31 +51,35 @@ def send_status(client: Socket, status_code: int):
     }[status_code].encode("utf-8") + b"\r\n")
 
 
+def handle_client(page: bytes, client: Socket, address: t.Tuple[str, str]):
+    _ = address
+    conn_info, *header_lines = recv_lines(client)
+    method, path, html_version = conn_info.split()
+    try:
+        assert method == "GET"
+        assert path == "/"
+        assert html_version == "HTTP/1.1"
+    except AssertionError:
+        send_status(client, 400)
+    else:
+        _ = translate_headers(header_lines)
+        send_status(client, 200)
+        client.sendall(create_header_string({
+            "Content-Length": str(len(page)),
+        }))
+        client.sendall(b"\r\n")
+        client.sendall(page)
+    client.close()
+
 def main_server(page: bytes, host: str = "localhost", port: int = 8080):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
     server.listen(1)
     while True:
-        client, _ = server.accept()
-        conn_info, *header_lines = recv_lines(client)
-        method, path, html_version = conn_info.split()
-        try:
-            assert method == "GET"
-            assert path == "/"
-            assert html_version == "HTTP/1.1"
-        except AssertionError:
-            send_status(client, 400)
-        else:
-            headers = translate_headers(header_lines)
-            pprint(headers)
-            send_status(client, 200)
-            client.sendall(create_header_string({
-                "Content-Length": str(len(page)),
-            }))
-            client.sendall(b"\r\n")
-            client.sendall(page)
-        client.close()
+        client, address = server.accept()
+        threading.Thread(target=handle_client,
+                         args=(page, client, address)).start()
 
 
 def main():
