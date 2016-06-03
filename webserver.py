@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import shutil
 import socket
+import os
 import threading
 import typing as t
 
@@ -51,27 +53,31 @@ def send_status(client: Socket, status_code: int):
     }[status_code].encode("utf-8") + b"\r\n")
 
 
-def handle_client(page: bytes, client: Socket, address: t.Tuple[str, str]):
+def handle_client(page: str, client: Socket, address: t.Tuple[str, str]):
     _ = address
     conn_info, *header_lines = recv_lines(client)
     method, path, html_version = conn_info.split()
-    try:
-        assert method == "GET"
-        assert path == "/"
-        assert html_version == "HTTP/1.1"
-    except AssertionError:
-        send_status(client, 400)
-    else:
-        _ = translate_headers(header_lines)
-        send_status(client, 200)
-        client.sendall(create_header_string({
-            "Content-Length": str(len(page)),
-        }))
-        client.sendall(b"\r\n")
-        client.sendall(page)
+
+    assert method == "GET"
+    assert path == "/"
+    assert html_version == "HTTP/1.1"
+    headers = translate_headers(header_lines)
+
+    filesize = os.path.getsize(page)
+
+    send_status(client, 200)
+    client.sendall(create_header_string({
+        "Content-Length": str(filesize),
+    }))
+    client.sendall(b"\r\n")
+
+    with open(page, "rb") as page_file:
+        shutil.copyfileobj(page_file, client.makefile("wb"))
+
+    client.sendall(b"\r\n")
     client.close()
 
-def main_server(page: bytes, host: str = "localhost", port: int = 8080):
+def main_server(page: str, host: str = "localhost", port: int = 8080):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
@@ -86,13 +92,12 @@ def main():
     import sys
 
     try:
-        with open(sys.argv[1]) as page_file:
-            page = page_file.read()
+        page = sys.argv[1]
     except IndexError:
         print("USAGE: webserver.py FILENAME")
         sys.exit(1)
     else:
-        main_server(page.encode("utf-8"))
+        main_server(page)
 
 if __name__ == "__main__":
     main()
