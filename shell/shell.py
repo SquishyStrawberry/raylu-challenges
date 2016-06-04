@@ -20,8 +20,6 @@ def main():
             print(os.getcwd())
         else:
             pid = os.fork()
-            signal.signal(signal.SIGINT,
-                          lambda *_: os.kill(pid, signal.SIGINT))
             if pid == 0:
                 if len(args) >= 2 and args[-2] == ">":
                     if not os.path.exists(args[-1]):
@@ -31,7 +29,10 @@ def main():
                 os.execvp(command, [command, *args])
                 raise RuntimeError("This should never happen!")
             else:
+                signal.signal(signal.SIGINT,
+                              lambda *_: os.kill(pid, signal.SIGINT))
                 os.waitpid(pid, 0)
+                signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 if __name__ == "__main__":
     main()
