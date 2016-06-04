@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import logging
 import mimetypes
 import os
 import shutil
@@ -9,6 +10,10 @@ import typing as t
 from coroutines import EventLoop
 
 Socket = socket.SocketType
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG if __debug__ else logging.INFO)
+logging.basicConfig(format="[%(asctime)s %(levelname)s]: %(message)s",
+                    datefmt="%H:%M:%S")
 
 
 def recv_lines(client: Socket, *, eol=b"\r\n") -> t.List[str]:
@@ -17,14 +22,6 @@ def recv_lines(client: Socket, *, eol=b"\r\n") -> t.List[str]:
         yield "recv", client
         buf += client.recv(4096)
     return [line.decode("utf-8") for line in buf.split(eol)]
-
-
-def recv_n_lines(client: Socket, amount: int, *, eol=b"\r\n") -> t.List[str]:
-    lines = []
-    while len(lines) < amount:
-        new_lines = yield from recv_lines(client, eol=eol)
-        lines.extend(new_lines)
-    return lines
 
 
 def translate_headers(header_lines: t.Iterable[str]) -> t.Mapping[str, str]:
@@ -66,33 +63,42 @@ def send_file(client: Socket, filename: str):
     with open(filename, "rb") as fileobj:
         while True:
             chunk = fileobj.read(4096)
+            if not chunk:
+                break
             yield "send", client
             client.sendall(chunk)
 
 
 def handle_client(page: str, client: Socket, address: t.Tuple[str, str]):
+    logger.info("Connected from %s:%s", *address)
     conn_info, *header_lines = yield from recv_lines(client)
-    method, path, html_version = conn_info.split()
     try:
+        method, path, html_version = conn_info.split()
         assert method == "GET"
         assert path == "/"
         assert html_version == "HTTP/1.1"
-    except AssertionError:
+    except (ValueError, AssertionError):
+        logger.info("Got invalid request from %s:%s!", *address)
         yield from send_headers(client, 400)
     else:
-        _ = translate_headers(header_lines)
+        headers = translate_headers(header_lines)
+        logger.info("Recieved headers %s from %s:%s", headers, *address)
         filesize = os.path.getsize(page)
         mimetype, encoding = mimetypes.guess_type(page)
+        logger.info("Sending headers to %s:%s", *address)
         yield from send_headers(client, 200, {
             "Content-Length": str(filesize),
             "Content-Type": mimetype or "",
             "Content-Encoding": encoding or "",
         }, mark_end=True)
+        logger.info("Sending file to %s:%s", *address)
         yield from send_file(client, page)
 
+    logger.info("Done with %s:%s", *address)
     yield "send", client
     client.sendall(b"\r\n")
     client.close()
+    logger.info("Disconnected from {}:{}".format(*address))
 
 
 def main_server(page: str, host: str = "localhost", port: int = 8080):
@@ -100,6 +106,7 @@ def main_server(page: str, host: str = "localhost", port: int = 8080):
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
     server.listen(1)
+    logger.info("Starting server")
     while True:
         yield "recv", server
         client, address = server.accept()
