@@ -17,23 +17,14 @@ class EventLoop:
         self.doing_nothing.append(func(*args, **kwargs))
 
     def _tick(self):
-        logger.debug("Coroutines %s are waiting to send",
-                     [f.__name__ for f in self.send_wait.values()])
-        logger.debug("Coroutines %s are waiting to recv",
-                     [f.__name__ for f in self.recv_wait.values()])
-        if self.recv_wait or self.send_wait:
-            recv_ready, send_ready, [] = \
-                select.select(self.recv_wait.keys(), self.send_wait.keys(), [])
+        recv_ready, send_ready, [] = \
+            select.select(self.recv_wait.keys(), self.send_wait.keys(), [], 0)
 
-            for sock in recv_ready:
-                coroutine = self.recv_wait.pop(sock)
-                logger.debug("%s is ready to recv", coroutine.__name__)
-                self.doing_nothing.append(coroutine)
+        for sock in recv_ready:
+            self.doing_nothing.append(self.recv_wait.pop(sock))
 
-            for sock in send_ready:
-                coroutine = self.send_wait.pop(sock)
-                logger.debug("%s is ready to send", coroutine.__name__)
-                self.doing_nothing.append(coroutine)
+        for sock in send_ready:
+            self.doing_nothing.append(self.send_wait.pop(sock))
 
         logger.debug("Coroutines %s are doing nothing",
                      [f.__name__ for f in self.doing_nothing])
