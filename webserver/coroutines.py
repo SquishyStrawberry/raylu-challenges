@@ -71,10 +71,13 @@ class AsyncSocket:
             sent = yield from self.send(remaining, flags)
             remaining = remaining[sent:]
 
-    def accept(self):
+    def accept(self, *, convert_to_async_socket=True):
         yield "recv", self._sock
         conn, addr = self._sock.accept()
-        return self.__class__(conn), addr
+        if convert_to_async_socket:
+            return self.__class__(conn), addr
+        else:
+            return conn, addr
 
     def __getattr__(self, key):
         return getattr(self._sock, key)
