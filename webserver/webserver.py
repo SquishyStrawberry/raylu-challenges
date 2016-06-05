@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
+import http.client
 import logging
 import mimetypes
 import os
-import shutil
 import socket
-import threading
 import typing as t
 
 from coroutines import EventLoop, AsyncSocket
@@ -41,10 +40,9 @@ def translate_headers(header_lines: t.Iterable[str]) -> t.Mapping[str, str]:
 def send_headers(client: AsyncSocket, status_code: int,
                  headers: t.Mapping[str, str] = {}, *, mark_end: bool = True):
 
-    yield from client.sendall({
-        200: "HTTP/1.1 200 OK",
-        400: "HTTP/1.1 400 Bad Request",
-    }[status_code].encode("utf-8") + b"\r\n")
+    status_string = "HTTP/1.1 {} {}".format(status_code,
+                                            http.client.responses[status_code])
+    yield from client.sendall(status_string.encode("utf-8") + b"\r\n")
     header_string = []
     for key, value in headers.items():
         # Sadly, `bytes.format` is not a thing.
@@ -92,9 +90,9 @@ def handle_client(page: str, client: AsyncSocket, address: t.Tuple[str, str]):
         }, mark_end=True)
         logger.info("Sending file to %s:%s", *address)
         yield from send_file(client, page)
+        yield from client.sendall(b"\r\n")
 
     logger.info("Done with %s:%s", *address)
-    yield from client.sendall(b"\r\n")
     client.close()
     logger.info("Disconnected from {}:{}".format(*address))
 
