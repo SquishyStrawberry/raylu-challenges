@@ -67,12 +67,16 @@ def send_file(client: AsyncSocket, filename: str):
 def handle_client(page: str, client: AsyncSocket, address: t.Tuple[str, str]):
     logger.info("Connected from %s:%s", *address)
     conn_info, *header_lines = yield from recv_lines(client)
+    invalid = False
     try:
-        method, path, html_version = conn_info.split()
-        assert method == "GET"
-        assert path == "/"
-        assert html_version == "HTTP/1.1"
-    except (ValueError, AssertionError):
+        method, path, http_version = conn_info.split()
+    except ValueError:
+        invalid = True
+    invalid = (invalid or
+               method != "GET" or
+               path != "/" or
+               http_version != "HTTP/1.1")
+    if invalid:
         logger.info("Got invalid request from %s:%s!", *address)
         yield from send_headers(client, 400)
     else:
