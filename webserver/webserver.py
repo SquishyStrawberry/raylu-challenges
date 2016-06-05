@@ -7,7 +7,7 @@ import socket
 import threading
 import typing as t
 
-from coroutines import EventLoop
+from coroutines import EventLoop, AsyncSocket
 
 Socket = socket.SocketType
 logger = logging.getLogger(__name__)
@@ -16,11 +16,10 @@ logging.basicConfig(format="[%(asctime)s %(levelname)s]: %(message)s",
                     datefmt="%H:%M:%S")
 
 
-def recv_lines(client: Socket, *, eol=b"\r\n") -> t.List[str]:
+def recv_lines(client: AsyncSocket, *, eol=b"\r\n") -> t.List[str]:
     buf = b""
     while eol not in buf:
-        yield "recv", client
-        buf += client.recv(4096)
+        buf += yield from client.recv(4096)
     return [line.decode("utf-8") for line in buf.split(eol)]
 
 
@@ -39,11 +38,10 @@ def translate_headers(header_lines: t.Iterable[str]) -> t.Mapping[str, str]:
     return headers
 
 
-def send_headers(client: Socket, status_code: int,
+def send_headers(client: AsyncSocket, status_code: int,
                  headers: t.Mapping[str, str] = {}, *, mark_end: bool = True):
 
-    yield "send", client
-    client.sendall({
+    yield from client.sendall({
         200: "HTTP/1.1 200 OK",
         400: "HTTP/1.1 400 Bad Request",
     }[status_code].encode("utf-8") + b"\r\n")
@@ -52,24 +50,21 @@ def send_headers(client: Socket, status_code: int,
         # Sadly, `bytes.format` is not a thing.
         header_string.append(b"%s: %s" % (key.encode("utf-8"),
                                           value.encode("utf-8")))
-    yield "send", client
-    client.sendall(b"\r\n".join(header_string) + b"\r\n")
+    yield from client.sendall(b"\r\n".join(header_string) + b"\r\n")
     if mark_end:
-        yield "send", client
-        client.sendall(b"\r\n")
+        yield from client.sendall(b"\r\n")
 
 
-def send_file(client: Socket, filename: str):
+def send_file(client: AsyncSocket, filename: str):
     with open(filename, "rb") as fileobj:
         while True:
             chunk = fileobj.read(4096)
             if not chunk:
                 break
-            yield "send", client
-            client.sendall(chunk)
+            yield from client.sendall(chunk)
 
 
-def handle_client(page: str, client: Socket, address: t.Tuple[str, str]):
+def handle_client(page: str, client: AsyncSocket, address: t.Tuple[str, str]):
     logger.info("Connected from %s:%s", *address)
     conn_info, *header_lines = yield from recv_lines(client)
     try:
@@ -95,21 +90,19 @@ def handle_client(page: str, client: Socket, address: t.Tuple[str, str]):
         yield from send_file(client, page)
 
     logger.info("Done with %s:%s", *address)
-    yield "send", client
-    client.sendall(b"\r\n")
+    yield from client.sendall(b"\r\n")
     client.close()
     logger.info("Disconnected from {}:{}".format(*address))
 
 
 def main_server(page: str, host: str = "localhost", port: int = 8080):
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server = AsyncSocket(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
     server.listen(1)
     logger.info("Starting server")
     while True:
-        yield "recv", server
-        client, address = server.accept()
+        client, address = yield from server.accept()
         yield "new_coroutine", handle_client, (page, client, address), {}
 
 
