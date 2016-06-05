@@ -18,7 +18,8 @@ class EventLoop:
 
     def _tick(self):
         recv_ready, send_ready, [] = \
-            select.select(self.recv_wait.keys(), self.send_wait.keys(), [], 0)
+            select.select(self.recv_wait.keys(), self.send_wait.keys(), [],
+                         0 if self.doing_nothing else None)
 
         for sock in recv_ready:
             self.doing_nothing.append(self.recv_wait.pop(sock))
