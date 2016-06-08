@@ -18,7 +18,11 @@ logging.basicConfig(format="[%(asctime)s %(levelname)s]: %(message)s",
 def recv_lines(client: AsyncSocket, *, eol=b"\r\n") -> t.List[str]:
     buf = b""
     while eol not in buf:
-        buf += yield from client.recv(4096)
+        recieved = yield from client.recv(4096)
+        if recieved:
+            buf += recieved
+        else:
+            raise RuntimeError("Socket has closed!")
     return [line.decode("utf-8") for line in buf.split(eol)]
 
 
@@ -64,7 +68,11 @@ def send_file(client: AsyncSocket, filename: str):
 
 def handle_client(page: str, client: AsyncSocket, address: t.Tuple[str, str]):
     logger.info("Connected from %s:%s", *address)
-    conn_info, *header_lines = yield from recv_lines(client)
+    try:
+        conn_info, *header_lines = yield from recv_lines(client)
+    except RuntimeError:
+        # Socket has closed, there's nothing we can do.
+        return
     invalid = False
     try:
         method, path, http_version = conn_info.split()
@@ -105,7 +113,7 @@ def main_server(page: str, host: str = "localhost", port: int = 8080):
     logger.info("Starting server")
     while True:
         client, address = yield from server.accept()
-        yield "new_coroutine", handle_client, (page, client, address), {}
+        yield "start_coroutine", handle_client, (page, client, address), {}
 
 
 def main():
@@ -120,7 +128,7 @@ def main():
         print("USAGE: webserver.py FILENAME")
         sys.exit(1)
     else:
-        el.start_new_coroutine(main_server, (page,))
+        el.start(main_server, page)
         el.mainloop()
 
 if __name__ == "__main__":

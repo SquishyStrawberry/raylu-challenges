@@ -9,45 +9,41 @@ logger.setLevel(logging.DEBUG if __debug__ else logging.INFO)
 
 class EventLoop:
     def __init__(self):
-        self.doing_nothing = []
         self.recv_wait = {}
         self.send_wait = {}
 
-    def start_new_coroutine(self, func, args=(), kwargs={}):
-        self.doing_nothing.append(func(*args, **kwargs))
+    def start(self, func, *args, **kwargs):
+        self._step_coroutine(func(*args, **kwargs))
+
+    def _step_coroutine(self, coroutine):
+        try:
+            why, what, *extra = next(coroutine)
+        except StopIteration:
+            logger.debug("%s is done running", coroutine.__name__)
+            return
+        logger.debug("%s is trying to %s", coroutine.__name__, why)
+        if why == "recv":
+            self.recv_wait[what] = coroutine
+        elif why == "send":
+            self.send_wait[what] = coroutine
+        elif why == "start_coroutine":
+            args, kwargs = extra
+            self.start(what, *args, **kwargs)
+            self._step_coroutine(coroutine)
+        else:
+            raise RuntimeError("Invalid coroutine action!")
 
     def _tick(self):
         recv_ready, send_ready, [] = \
-            select.select(self.recv_wait.keys(), self.send_wait.keys(), [],
-                         0 if self.doing_nothing else None)
+            select.select(self.recv_wait.keys(), self.send_wait.keys(), [],)
 
         for sock in recv_ready:
-            self.doing_nothing.append(self.recv_wait.pop(sock))
+            coroutine = self.recv_wait.pop(sock)
+            self._step_coroutine(coroutine)
 
         for sock in send_ready:
-            self.doing_nothing.append(self.send_wait.pop(sock))
-
-        logger.debug("Coroutines %s are doing nothing",
-                     [f.__name__ for f in self.doing_nothing])
-        for coroutine in tuple(self.doing_nothing):
-            try:
-                why, what, *extra = next(coroutine)
-            except StopIteration:
-                logger.debug("%s is done running", coroutine.__name__)
-                self.doing_nothing.remove(coroutine)
-                continue
-            logger.debug("%s is trying to %s", coroutine.__name__, why)
-            if why == "recv":
-                self.doing_nothing.remove(coroutine)
-                self.recv_wait[what] = coroutine
-            elif why == "send":
-                self.doing_nothing.remove(coroutine)
-                self.send_wait[what] = coroutine
-            elif why == "new_coroutine":
-                args, kwargs = extra
-                self.start_new_coroutine(what, args, kwargs)
-            else:
-                raise RuntimeError("Invalid coroutine action!")
+            coroutine = self.send_wait.pop(sock)
+            self._step_coroutine(coroutine)
 
     def mainloop(self):
         while True:
