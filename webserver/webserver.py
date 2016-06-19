@@ -15,7 +15,7 @@ logging.basicConfig(format="[%(asctime)s %(levelname)s]: %(message)s",
                     datefmt="%H:%M:%S")
 
 
-def recv_lines(client: AsyncSocket, *, eol=b"\r\n") -> t.List[str]:
+def recv_lines(client, *, eol=b"\r\n") -> t.List[str]:
     buf = b""
     while eol not in buf:
         recieved = yield from client.recv(4096)
@@ -26,8 +26,8 @@ def recv_lines(client: AsyncSocket, *, eol=b"\r\n") -> t.List[str]:
     return [line.decode("utf-8") for line in buf.split(eol)]
 
 
-def translate_headers(header_lines: t.Iterable[str]) -> t.Mapping[str, str]:
-    headers = {}  # type: t.Mapping[str, str]
+def translate_headers(header_lines):
+    headers = {}
     for line in header_lines:
         if not line:
             break
@@ -41,8 +41,7 @@ def translate_headers(header_lines: t.Iterable[str]) -> t.Mapping[str, str]:
     return headers
 
 
-def send_headers(client: AsyncSocket, status_code: int,
-                 headers: t.Mapping[str, str] = {}, *, mark_end: bool = True):
+def send_headers(client, status_code, headers={}, *, mark_end=True):
 
     status_string = "HTTP/1.1 {} {}".format(status_code,
                                             http.client.responses[status_code])
@@ -57,7 +56,7 @@ def send_headers(client: AsyncSocket, status_code: int,
         yield from client.sendall(b"\r\n")
 
 
-def send_file(client: AsyncSocket, filename: str):
+def send_file(client, filename):
     with open(filename, "rb") as fileobj:
         while True:
             chunk = fileobj.read(4096)
@@ -66,7 +65,7 @@ def send_file(client: AsyncSocket, filename: str):
             yield from client.sendall(chunk)
 
 
-def handle_client(page: str, client: AsyncSocket, address: t.Tuple[str, str]):
+def handle_client(page, client, address):
     logger.info("Connected from %s:%s", *address)
     try:
         conn_info, *header_lines = yield from recv_lines(client)
@@ -105,7 +104,7 @@ def handle_client(page: str, client: AsyncSocket, address: t.Tuple[str, str]):
     logger.info("Disconnected from {}:{}".format(*address))
 
 
-def main_server(page: str, host: str = "localhost", port: int = 8080):
+def main_server(page, host="localhost", port=8080):
     server = AsyncSocket(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((host, port))
@@ -113,14 +112,14 @@ def main_server(page: str, host: str = "localhost", port: int = 8080):
     logger.info("Starting server")
     while True:
         client, address = yield from server.accept()
-        yield "start_coroutine", handle_client, (page, client, address), {}
+        yield "spawn", handle_client, (page, client, address), {}
 
 
 def main():
     import sys
 
     socket.setdefaulttimeout(0)
-    el = EventLoop()
+    loop = EventLoop()
 
     try:
         page = sys.argv[1]
@@ -128,8 +127,8 @@ def main():
         print("USAGE: webserver.py FILENAME")
         sys.exit(1)
     else:
-        el.start(main_server, page)
-        el.mainloop()
+        loop.spawn(main_server, page)
+        loop.mainloop()
 
 if __name__ == "__main__":
     main()

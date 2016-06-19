@@ -7,12 +7,19 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG if __debug__ else logging.INFO)
 
 
+def _fill_in(base_list, extension_list):
+    """
+    Replaces missing values in `base_list` with values from `extension_list`.
+    """
+    return base_list + extension_list[len(base_list):]
+
+
 class EventLoop:
     def __init__(self):
         self.recv_wait = {}
         self.send_wait = {}
 
-    def start(self, func, *args, **kwargs):
+    def spawn(self, func, *args, **kwargs):
         self._step_coroutine(func(*args, **kwargs))
 
     def _step_coroutine(self, coroutine):
@@ -26,15 +33,8 @@ class EventLoop:
             self.recv_wait[what] = coroutine
         elif why == "send":
             self.send_wait[what] = coroutine
-        elif why == "start_coroutine":
-            try:
-                args, kwargs = extra
-            except ValueError:
-                kwargs = {}
-                try:
-                    [args] = extra
-                except ValueError:
-                    args = ()
+        elif why == "spawn":
+            args, kwargs = _fill_in(extra, [(), {}])
             self.start(what, *args, **kwargs)
             self._step_coroutine(coroutine)
         else:
