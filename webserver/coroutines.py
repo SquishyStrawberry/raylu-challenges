@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import select
 import logging
+import select
 
 __all__ = ["EventLoop", "AsyncSocket"]
 logger = logging.getLogger(__name__)
@@ -19,9 +19,6 @@ class EventLoop:
         self.recv_wait = {}
         self.send_wait = {}
 
-    def spawn(self, func, *args, **kwargs):
-        self._step_coroutine(func(*args, **kwargs))
-
     def _step_coroutine(self, coroutine):
         try:
             why, what, *extra = next(coroutine)
@@ -35,7 +32,7 @@ class EventLoop:
             self.send_wait[what] = coroutine
         elif why == "spawn":
             args, kwargs = _fill_in(extra, [(), {}])
-            self.start(what, *args, **kwargs)
+            self.spawn(what, *args, **kwargs)
             self._step_coroutine(coroutine)
         else:
             raise RuntimeError("Invalid coroutine action!")
@@ -49,6 +46,9 @@ class EventLoop:
 
         for sock in send_ready:
             self._step_coroutine(self.send_wait.pop(sock))
+
+    def spawn(self, func, *args, **kwargs):
+        self._step_coroutine(func(*args, **kwargs))
 
     def mainloop(self):
         while True:
