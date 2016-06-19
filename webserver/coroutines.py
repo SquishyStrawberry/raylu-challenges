@@ -27,7 +27,14 @@ class EventLoop:
         elif why == "send":
             self.send_wait[what] = coroutine
         elif why == "start_coroutine":
-            args, kwargs = extra
+            try:
+                args, kwargs = extra
+            except ValueError:
+                kwargs = {}
+                try:
+                    [args] = extra
+                except ValueError:
+                    args = ()
             self.start(what, *args, **kwargs)
             self._step_coroutine(coroutine)
         else:
@@ -35,15 +42,13 @@ class EventLoop:
 
     def _tick(self):
         recv_ready, send_ready, [] = \
-            select.select(self.recv_wait.keys(), self.send_wait.keys(), [],)
+            select.select(self.recv_wait.keys(), self.send_wait.keys(), [])
 
         for sock in recv_ready:
-            coroutine = self.recv_wait.pop(sock)
-            self._step_coroutine(coroutine)
+            self._step_coroutine(self.recv_wait.pop(sock))
 
         for sock in send_ready:
-            coroutine = self.send_wait.pop(sock)
-            self._step_coroutine(coroutine)
+            self._step_coroutine(self.send_wait.pop(sock))
 
     def mainloop(self):
         while True:
